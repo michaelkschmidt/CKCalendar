@@ -26,10 +26,12 @@ enum {
 typedef int startDay;
 
 @property (nonatomic) startDay calendarStartDay;
+@property (nonatomic, strong) NSLocale *locale;
 @property (nonatomic, strong) NSDate *minimumDate;
 @property (nonatomic, strong) NSDate *maximumDate;
 @property (nonatomic, strong) NSDate *selectedDate;
 @property (nonatomic) BOOL shouldFillCalendar;
+@property (nonatomic) BOOL adaptHeightToNumberOfWeeksInMonth;
 @property (nonatomic, weak) id<CKCalendarDelegate> delegate;
 
 - (id)initWithStartDay:(startDay)firstDay;
@@ -78,5 +80,8 @@ typedef int startDay;
 
 - (void)calendar:(CKCalendarView *)calendar didSelectDate:(NSDate *)date;
 @optional
--(void)calendar:(CKCalendarView *)calendar didResize:(CGSize)size;
+
+-(void)calendarDidResize:(CKCalendarView *)calendar;
+
 @end
+

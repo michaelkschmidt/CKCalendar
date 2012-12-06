@@ -102,7 +102,6 @@
 @property (nonatomic, strong) NSCalendar *calendar;
 @property(nonatomic, assign) CGFloat cellWidth;
 
-
 @end
 
 @implementation CKCalendarView
@@ -134,9 +133,11 @@
 @synthesize cellWidth = _cellWidth;
 
 @synthesize calendarStartDay = _calendarStartDay;
+@dynamic locale;
 @synthesize minimumDate = _minimumDate;
 @synthesize maximumDate = _maximumDate;
 @synthesize shouldFillCalendar = _shouldFillCalendar;
+@synthesize adaptHeightToNumberOfWeeksInMonth = _adaptHeightToNumberOfWeeksInMonth;
 
 
 - (id)init {
@@ -159,6 +160,7 @@
 
     self.calendarStartDay = firstDay;
     self.shouldFillCalendar = NO;
+    self.adaptHeightToNumberOfWeeksInMonth = YES;
 
     self.layer.cornerRadius = 6.0f;
 
@@ -206,9 +208,8 @@
     self.daysHeader = daysHeader;
 
     NSMutableArray *labels = [NSMutableArray array];
-    for (NSString *day in [self getDaysOfTheWeek]) {
+    for (int i = 0; i < 7; ++i) {
         UILabel *dayOfWeekLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-        dayOfWeekLabel.text = [day uppercaseString];
         dayOfWeekLabel.textAlignment = NSTextAlignmentCenter;
         dayOfWeekLabel.backgroundColor = [UIColor clearColor];
         dayOfWeekLabel.shadowColor = [UIColor whiteColor];
@@ -217,6 +218,7 @@
         [self.calendarContainer addSubview:dayOfWeekLabel];
     }
     self.dayOfWeekLabels = labels;
+    [self updateDayOfWeekLabels];
 
     // at most we'll need 42 buttons, so let's just bite the bullet and make them now...
     NSMutableArray *dateButtons = [NSMutableArray array];
@@ -262,17 +264,23 @@
     CGFloat containerWidth = self.bounds.size.width - (CALENDAR_MARGIN * 2);
     self.cellWidth = (containerWidth / 7.0) - CELL_BORDER_WIDTH;
 
-    CGFloat containerHeight = ([self numberOfWeeksInMonthContainingDate:self.monthShowing] * (self.cellWidth + CELL_BORDER_WIDTH) + DAYS_HEADER_HEIGHT);
-
+    NSInteger numberOfWeeksToShow = 6;
+    if (self.adaptHeightToNumberOfWeeksInMonth) {
+        numberOfWeeksToShow = [self numberOfWeeksInMonthContainingDate:self.monthShowing];
+    }
+    CGFloat containerHeight = (numberOfWeeksToShow * (self.cellWidth + CELL_BORDER_WIDTH) + DAYS_HEADER_HEIGHT);
 
     CGRect newFrame = self.frame;
     newFrame.size.height = containerHeight + CALENDAR_MARGIN + TOP_HEIGHT;
     self.frame = newFrame;
 
-    [self.delegate calendar:self didResize:self.frame.size];
+    if ([self.delegate respondsToSelector:@selector(calendarDidResize:)]) {
+        [self.delegate calendarDidResize:self];
+    }
 
     self.highlight.frame = CGRectMake(1, 1, self.bounds.size.width - 2, 1);
 
+    self.titleLabel.text = [self.dateFormatter stringFromDate:_monthShowing];
     self.titleLabel.frame = CGRectMake(0, 0, self.bounds.size.width, TOP_HEIGHT);
     self.prevButton.frame = CGRectMake(BUTTON_MARGIN, BUTTON_MARGIN, 48, 38);
     self.nextButton.frame = CGRectMake(self.bounds.size.width - 48 - BUTTON_MARGIN, BUTTON_MARGIN, 48, 38);
@@ -299,9 +307,9 @@
 
     NSDate *endDate = [self firstDayOfNextMonthContainingDate:self.monthShowing];
     if (self.shouldFillCalendar) {
-        while ([self placeInWeekForDate:endDate] != 0) {
-            endDate = [self nextDay:endDate];
-        }
+        NSDateComponents *comps = [[NSDateComponents alloc] init];
+        [comps setWeek:numberOfWeeksToShow];
+        endDate = [self.calendar dateByAddingComponents:comps toDate:date options:0];
     }
 
     NSUInteger dateButtonPosition = 0;
@@ -336,23 +344,42 @@
     }
 }
 
-- (void)setCalendarStartDay:(startDay)calendarStartDay {
-    _calendarStartDay = calendarStartDay;
-    [self.calendar setFirstWeekday:self.calendarStartDay];
+- (void)updateDayOfWeekLabels {
+    NSArray *weekdays = [self.dateFormatter shortWeekdaySymbols];
+    // adjust array depending on which weekday should be first
+    NSUInteger firstWeekdayIndex = [self.calendar firstWeekday] - 1;
+    if (firstWeekdayIndex > 0) {
+        weekdays = [[weekdays subarrayWithRange:NSMakeRange(firstWeekdayIndex, 7 - firstWeekdayIndex)]
+                    arrayByAddingObjectsFromArray:[weekdays subarrayWithRange:NSMakeRange(0, firstWeekdayIndex)]];
+    }
 
     NSUInteger i = 0;
-    for (NSString *day in [self getDaysOfTheWeek]) {
+    for (NSString *day in weekdays) {
         [[self.dayOfWeekLabels objectAtIndex:i] setText:[day uppercaseString]];
         i++;
     }
+}
 
+- (void)setCalendarStartDay:(startDay)calendarStartDay {
+    _calendarStartDay = calendarStartDay;
+    [self.calendar setFirstWeekday:self.calendarStartDay];
+    [self updateDayOfWeekLabels];
     [self setNeedsLayout];
+}
+
+- (void)setLocale:(NSLocale *)locale {
+    [self.dateFormatter setLocale:locale];
+    [self updateDayOfWeekLabels];
+    [self setNeedsLayout];
+}
+
+- (NSLocale *)locale {
+    return self.dateFormatter.locale;
 }
 
 - (void)setMonthShowing:(NSDate *)aMonthShowing {
     _monthShowing = [self firstDayOfMonthContainingDate:aMonthShowing];
 
-    self.titleLabel.text = [self.dateFormatter stringFromDate:_monthShowing];
     [self setNeedsLayout];
 }
 
@@ -364,6 +391,11 @@
 
 - (void)setShouldFillCalendar:(BOOL)shouldFillCalendar {
     _shouldFillCalendar = shouldFillCalendar;
+    [self setNeedsLayout];
+}
+
+- (void)setAdaptHeightToNumberOfWeeksInMonth:(BOOL)adaptHeightToNumberOfWeeksInMonth {
+    _adaptHeightToNumberOfWeeksInMonth = adaptHeightToNumberOfWeeksInMonth;
     [self setNeedsLayout];
 }
 
@@ -396,15 +428,9 @@
 }
 
 - (CGRect)calculateDayCellFrame:(NSDate *)date {
-    NSComparisonResult monthComparison = [self compareByMonth:date toDate:self.monthShowing];
-    NSInteger row;
-    if (monthComparison == NSOrderedAscending) {
-        row = 0;
-    } else if (monthComparison == NSOrderedDescending) {
-        row = [self numberOfWeeksInMonthContainingDate:self.monthShowing] - 1;
-    } else {
-        row = [self weekNumberInMonthForDate:date];
-    }
+    NSInteger numberOfDaysSinceBeginningOfThisMonth = [self numberOfDaysFromDate:self.monthShowing toDate:date];
+    NSInteger row = (numberOfDaysSinceBeginningOfThisMonth + [self placeInWeekForDate:self.monthShowing]) / 7;
+	
     NSInteger placeInWeek = [self placeInWeekForDate:date];
 
     return CGRectMake(placeInWeek * (self.cellWidth + CELL_BORDER_WIDTH), (row * (self.cellWidth + CELL_BORDER_WIDTH)) + CGRectGetMaxY(self.daysHeader.frame) + CELL_BORDER_WIDTH, self.cellWidth, self.cellWidth);
@@ -549,17 +575,6 @@
     }
 }
 
-- (NSArray *)getDaysOfTheWeek {
-    // adjust array depending on which weekday should be first
-    NSArray *weekdays = [self.dateFormatter shortWeekdaySymbols];
-    NSUInteger firstWeekdayIndex = [self.calendar firstWeekday] - 1;
-    if (firstWeekdayIndex > 0) {
-        weekdays = [[weekdays subarrayWithRange:NSMakeRange(firstWeekdayIndex, 7 - firstWeekdayIndex)]
-                    arrayByAddingObjectsFromArray:[weekdays subarrayWithRange:NSMakeRange(0, firstWeekdayIndex)]];
-    }
-    return weekdays;
-}
-
 - (NSInteger)placeInWeekForDate:(NSDate *)date {
     NSDateComponents *compsFirstDayInMonth = [self.calendar components:NSWeekdayCalendarUnit fromDate:date];
     return (compsFirstDayInMonth.weekday - 1 - self.calendar.firstWeekday + 8) % 7;
@@ -604,6 +619,12 @@
     NSDateComponents *comps = [[NSDateComponents alloc] init];
     [comps setDay:-1];
     return [self.calendar dateByAddingComponents:comps toDate:date options:0];
+}
+
+- (NSInteger)numberOfDaysFromDate:(NSDate *)startDate toDate:(NSDate *)endDate {
+    NSInteger startDay = [self.calendar ordinalityOfUnit:NSDayCalendarUnit inUnit:NSEraCalendarUnit forDate:startDate];
+    NSInteger endDay = [self.calendar ordinalityOfUnit:NSDayCalendarUnit inUnit:NSEraCalendarUnit forDate:endDate];
+    return endDay - startDay;
 }
 
 + (UIImage *)imageNamed:(NSString *)name withColor:(UIColor *)color {

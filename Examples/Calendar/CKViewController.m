@@ -4,6 +4,7 @@
 
 @interface CKViewController () <CKCalendarDelegate>
 
+@property(nonatomic, weak) CKCalendarView *calendar;
 @property(nonatomic, strong) UILabel *dateLabel;
 @property(nonatomic, strong) NSDateFormatter *dateFormatter;
 
@@ -18,6 +19,7 @@
     self = [super init];
     if (self) {
         CKCalendarView *calendar = [[CKCalendarView alloc] initWithStartDay:startMonday];
+        self.calendar = calendar;
         calendar.delegate = self;
 
         self.dateFormatter = [[NSDateFormatter alloc] init];
@@ -25,6 +27,8 @@
         calendar.selectedDate = [self.dateFormatter dateFromString:@"18/07/2012"];
         calendar.minimumDate = [self.dateFormatter dateFromString:@"09/07/2012"];
         calendar.maximumDate = [self.dateFormatter dateFromString:@"29/07/2012"];
+        calendar.shouldFillCalendar = YES;
+        calendar.adaptHeightToNumberOfWeeksInMonth = NO;
 
         calendar.frame = CGRectMake(10, 10, 300, 320);
         [self.view addSubview:calendar];
@@ -33,8 +37,14 @@
         [self.view addSubview:self.dateLabel];
 
         self.view.backgroundColor = [UIColor whiteColor];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(localeDidChange) name:NSCurrentLocaleDidChangeNotification object:nil];
     }
     return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)viewDidLoad
@@ -56,6 +66,10 @@
     } else {
         return YES;
     }
+}
+
+- (void)localeDidChange {
+    [self.calendar setLocale:[NSLocale currentLocale]];
 }
 
 #pragma mark -
